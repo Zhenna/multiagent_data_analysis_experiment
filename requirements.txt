@@ -1,0 +1,6 @@
+fastapi
+uvicorn
+pandas
+langchain>=0.1.16
+langchain-community>=0.0.30
+pydantic
