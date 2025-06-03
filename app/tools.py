@@ -1,119 +1,151 @@
-from app.shared import data_sources, shared_context
 import pandas as pd
-import re
 from langchain.tools import tool
-from pydantic import BaseModel
+from app.shared import shared_context
 
-# Dynamically generate context-aware planner prompt
-if "data_context" in shared_context:
+# ----------------------
+# Tool: Extract Dataset and Metric
+# ----------------------
+@tool
+def extract_dataset_and_metric(query: str) -> str:
+    """Extracts the relevant dataset and metric from the query and stores in shared context."""
     ctx = shared_context["data_context"]
-    descriptions = [f"- {name}: {cfg['description']}" for name, cfg in ctx.items() if "description" in cfg]
-    planner_description = "You can choose from the following datasets:\n" + "\n".join(descriptions)
-    shared_context["planner_prompt"] = planner_description
+    selected_ds = None
+    selected_metric = None
 
-class ExtractInput(BaseModel):
-    query: str
+    for name, meta in ctx.items():
+        if any(k in query.lower() for k in meta.get("keywords", [])):
+            selected_ds = name
+            break
 
+    if selected_ds:
+        for metric in ctx[selected_ds].get("metrics", []):
+            if metric.lower() in query.lower():
+                selected_metric = metric
+                break
+
+    if not selected_ds:
+        return "Unable to determine relevant dataset."
+
+    shared_context["active_dataset"] = selected_ds
+    shared_context["active_metric"] = selected_metric or ctx[selected_ds].get("metrics", [])[0]
+    return f"Using dataset '{selected_ds}' and metric '{shared_context['active_metric']}'."
+
+
+# ----------------------
+# Tool: Aggregate Metric
+# ----------------------
 @tool
-def extract_dataset_and_metric(input: ExtractInput) -> dict:
-    """Infer the dataset and metric to analyze based on user query, using contextual definitions."""
-    query = input.query.lower()
-    context = shared_context.get("data_context", {})
+def aggregate_metric(query: str) -> str:
+    """Aggregates the selected metric by timestamp and inverter_id, supports filtering by date or inverter_id."""
+    ds_name = shared_context.get("active_dataset")
+    metric = shared_context.get("active_metric")
+    df = shared_context["data_sources"].get(ds_name)
 
-    for dataset, info in context.items():
-        for metric in info.get("metrics", []):
-            if metric.lower() in query:
-                return {"dataset": dataset, "metric": metric}
-
-    fallback_keywords = {
-        "feature": ("features", "importance"),
-        "probability": ("performance", "predicted failure probabilities"),
-        "downtime": ("performance", "predicted downtime"),
-    }
-    for k, (ds, m) in fallback_keywords.items():
-        if k in query:
-            return {"dataset": ds, "metric": m}
-
-    return {"dataset": "performance", "metric": "predicted failure probabilities"}
-
-class AggregateInput(BaseModel):
-    dataset: str
-    metric: str
-    time_granularity: str = 'H'
-
-@tool
-def aggregate_metric(input: AggregateInput) -> str:
-    """Aggregate the specified metric in the dataset by time and inverter ID."""
-    dataset = input.dataset
-    metric = input.metric
-    time_granularity = input.time_granularity
-    freq_map = {'minute': 'T', 'hour': 'H', 'day': 'D', 'week': 'W', 'month': 'M'}
-    freq = freq_map.get(time_granularity.lower(), 'H')
-
-    df_local = data_sources[dataset].copy()
-    if 'timestamp' not in df_local.columns:
-        return f"Dataset '{dataset}' does not contain timestamp information for aggregation."
-    df_local['timestamp'] = pd.to_datetime(df_local['timestamp'], errors='coerce')
-    if df_local['timestamp'].isnull().any():
-        return "Some timestamp values could not be parsed."
+    if df is None or df.empty:
+        return "No data found to aggregate."
 
     try:
-        df_local.set_index('timestamp', inplace=True)
-        aggregated = df_local.groupby('inverter_id').resample(freq)[metric].mean().reset_index()
-        shared_context['aggregated_df'] = aggregated
-        shared_context['metric_col'] = metric
-        shared_context['dataset'] = dataset
-        shared_context['time_granularity'] = freq
-        return f"Averaged '{metric}' over {freq}-level time bins per inverter."
+        df.columns = [col.lower() for col in df.columns]
+        metric = metric.lower()
+        df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
+        df = df.dropna(subset=["timestamp"])
+
+        # Optional filtering
+        if "start" in query.lower() or "end" in query.lower():
+            if "start=" in query.lower():
+                start = query.lower().split("start=")[1].split()[0]
+                df = df[df["timestamp"] >= pd.to_datetime(start, errors="coerce")]
+            if "end=" in query.lower():
+                end = query.lower().split("end=")[1].split()[0]
+                df = df[df["timestamp"] <= pd.to_datetime(end, errors="coerce")]
+
+        if "inverter=" in query.lower():
+            inv = query.lower().split("inverter=")[1].split()[0].upper()
+            df = df[df["inverter_id"] == inv]
+
+        df.set_index("timestamp", inplace=True)
+        df_agg = df.groupby("inverter_id")[metric].resample("H").mean().reset_index()
+        shared_context["aggregated_df"] = df_agg
+        return f"Aggregated '{metric}' by hour."
     except Exception as e:
         return f"Aggregation failed: {e}"
 
-class CalculateInput(BaseModel):
-    metric: str
 
+# ----------------------
+# Tool: Calculate Top Performer
+# ----------------------
 @tool
-def calculate_top_performer(input: CalculateInput) -> str:
-    """Calculate which inverter has the worst (highest) value of the given metric."""
-    metric = input.metric
-    df_agg = shared_context.get('aggregated_df')
-    dataset_key = shared_context.get('dataset', 'performance')
-    df = data_sources[dataset_key]
+def calculate_top_performer(_: str) -> str:
+    """Finds the worst performing inverter based on the selected metric."""
+    ds_name = shared_context.get("active_dataset")
+    df = shared_context.get("aggregated_df") or shared_context["data_sources"].get(ds_name)
+    metric = shared_context.get("active_metric")
 
-    if df_agg is None:
-        if metric not in df.columns:
-            return f"Column '{metric}' not found."
-        df_agg = df.groupby('inverter_id')[metric].mean().reset_index()
+    if df is None or df.empty:
+        return "No data available for calculation."
 
     try:
-        grouped = df_agg.groupby('inverter_id')[metric].mean()
-        top_inverter = grouped.idxmax()
-        top_value = grouped.max()
-        return f"{top_inverter} has the highest '{metric}' with an average of {top_value:.4f}."
+        df.columns = [col.lower() for col in df.columns]
+        metric = metric.lower()
+        worst = df.groupby("inverter_id")[metric].mean().idxmax()
+        val = df.groupby("inverter_id")[metric].mean().max()
+        shared_context["calculation_result"] = {
+            "inverter_id": worst,
+            "value": val,
+            "metric": metric
+        }
+        return f"Worst performer: {worst} ({val:.4f})"
     except Exception as e:
         return f"Calculation failed: {e}"
 
-class SortInput(BaseModel):
-    metric: str
 
+# ----------------------
+# Tool: Sort Inverters
+# ----------------------
 @tool
-def sort_inverters(input: SortInput) -> str:
-    """Sort inverters by the given metric and return top/bottom performers."""
-    metric = input.metric
-    dataset_key = shared_context.get('dataset', 'performance')
-    df = data_sources[dataset_key]
-    df_agg = shared_context.get('aggregated_df')
+def sort_inverters(_: str) -> str:
+    """Sort inverters by metric and store top/bottom performers."""
+    ds_name = shared_context.get("active_dataset")
+    df = shared_context.get("aggregated_df") or shared_context["data_sources"].get(ds_name)
+    metric = shared_context.get("active_metric")
 
-    if df_agg is None:
-        if metric not in df.columns:
-            return f"Column '{metric}' not found."
-        df_agg = df.groupby('inverter_id')[metric].mean().reset_index()
+    if df is None or df.empty:
+        return "No data available to sort."
 
     try:
-        grouped = df_agg.groupby('inverter_id')[metric].mean()
-        top3 = grouped.sort_values(ascending=False).head(3).round(4)
-        bottom3 = grouped.sort_values().head(3).round(4)
-        top_str = ", ".join([f"{idx} ({val})" for idx, val in top3.items()])
-        bottom_str = ", ".join([f"{idx} ({val})" for idx, val in bottom3.items()])
-        return f"Top 3: {top_str}. Bottom 3: {bottom_str}."
+        df.columns = [col.lower() for col in df.columns]
+        metric = metric.lower()
+        mean_vals = df.groupby("inverter_id")[metric].mean().sort_values(ascending=False)
+        shared_context["sorted_inverters"] = mean_vals.to_dict()
+        return f"Top 3 inverters:\n{mean_vals.head(3).to_string()}"
     except Exception as e:
         return f"Sorting failed: {e}"
+
+
+# ----------------------
+# Tool: Final Response
+# ----------------------
+@tool
+def final_response_tool(_: str) -> str:
+    """Generate a concise answer from shared_context outputs."""
+    result = shared_context.get("calculation_result")
+    if not result:
+        return "No result computed."
+
+    inv = result["inverter_id"]
+    val = result["value"]
+    metric = result["metric"]
+
+    return f"Inverter {inv} has the worst performance based on '{metric}' with a value of {val:.4f}."
+
+
+# ----------------------
+# List of all tools
+# ----------------------
+tools = [
+    extract_dataset_and_metric,
+    aggregate_metric,
+    calculate_top_performer,
+    sort_inverters,
+    final_response_tool
+]

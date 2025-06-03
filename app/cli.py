@@ -1,16 +1,17 @@
-from app.agents import structured_agent_executor
+# app/cli.py
 
-def run_cli():
-    print("🧠 Inverter Chatbot CLI. Type 'exit' to quit.")
+import sys
+from app.agents import planner_executor
+
+def main():
+    print("🔌 Inverter Chatbot (type 'exit' to quit)")
     while True:
-        user_input = input(">> ")
-        if user_input.strip().lower() in {"exit", "quit"}:
+        user_input = input("🧠 Query: ")
+        if user_input.lower() in ["exit", "quit"]:
+            print("👋 Exiting.")
             break
-        result = structured_agent_executor.invoke({
-        "input": user_input,
-        "chat_history": [],
-    })
-
+        result = planner_executor.invoke({"input": user_input})
+        print(f"🤖 Answer: {result}\n")
 
 if __name__ == "__main__":
-    run_cli()
+    main()
