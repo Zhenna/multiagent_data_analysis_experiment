@@ -95,42 +95,6 @@ def aggregate_metric(**kwargs) -> str:
     return f"Aggregated '{metric}' by '{aggregation_level}' for inverter(s)."
 
 
-# @tool(args_schema=QueryInput)
-# def aggregate_metric(**kwargs) -> str:
-#     """Aggregate inverter performance metrics with optional filters and custom aggregation level."""
-#     input = QueryInput(**kwargs)
-#     ds_name = shared_context.get("active_dataset", "performance")
-#     df = shared_context["data_sources"].get(ds_name)
-#     metric = shared_context["data_context"][ds_name]["metrics"][0]
-
-#     if df is None or df.empty:
-#         return "No data to process."
-
-#     df.columns = [col.strip().lower() for col in df.columns]
-
-#     if "timestamp" not in df.columns:
-#         return "Dataset is missing required 'timestamp' column for aggregation."
-
-#     df["timestamp"] = pd.to_datetime(df["timestamp"], errors="coerce")
-#     df = df.dropna(subset=["timestamp"])
-
-#     if input.start_date:
-#         df = df[df["timestamp"] >= pd.to_datetime(input.start_date)]
-#     if input.end_date:
-#         df = df[df["timestamp"] <= pd.to_datetime(input.end_date)]
-#     if input.inverter_id:
-#         df = df[df["inverter_id"] == input.inverter_id.upper()]
-
-#     df.set_index("timestamp", inplace=True)
-#     aggregation_level = input.aggregation.upper() if input.aggregation else "H"
-#     df_agg = df.groupby("inverter_id")[metric.lower()].resample(aggregation_level).mean().reset_index()
-#     df_agg_by_inv = df_agg.groupby("inverter_id")[metric.lower()].mean(numeric_only=True).reset_index()
-
-#     shared_context["aggregated_df"] = df_agg_by_inv
-#     shared_context["active_metric"] = metric.lower()
-#     return f"Aggregated '{metric}' by '{aggregation_level}' for inverter(s)."
-
-
 class EmptyInput(BaseModel):
     pass
 
@@ -140,7 +104,7 @@ class EmptyInput(BaseModel):
 # ----------------------
 @tool(args_schema=EmptyInput)
 def sort_inverters(**kwargs) -> str:
-    """Sort inverters by average value of the selected metric from aggregated data."""
+    """Sort inverters by average value of the selected metric from aggregated data. Lower is better for negative metrics like downtime or failure probability."""
     df = shared_context.get("aggregated_df")
     metric = shared_context.get("active_metric")
 
@@ -150,9 +114,17 @@ def sort_inverters(**kwargs) -> str:
     try:
         df.columns = [col.lower() for col in df.columns]
         metric = metric.lower()
-        mean_vals = df.groupby("inverter_id")[metric].mean().sort_values(ascending=False)
+
+        # Determine if lower is better
+        lower_is_better_keywords = ["downtime", "failure", "probability", "error"]
+        ascending = any(kw in metric for kw in lower_is_better_keywords)
+
+        # Sort
+        mean_vals = df.groupby("inverter_id")[metric].mean().sort_values(ascending=ascending)
         shared_context["sorted_inverters"] = mean_vals.to_dict()
-        return f"Sorted inverters by average '{metric}':\n{mean_vals.to_string()}"
+
+        direction = "ascending (lower is better)" if ascending else "descending (higher is better)"
+        return f"Sorted inverters by average '{metric}' ({direction}):\n{mean_vals.to_string()}"
     except Exception as e:
         return f"Sorting failed: {e}"
 
