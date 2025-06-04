@@ -15,7 +15,7 @@ prompt = ChatPromptTemplate.from_messages([
      "You are a helpful assistant that analyzes inverter performance data.\n"
      "Always use the provided tools and shared context to answer user queries. Do not guess or use external knowledge.\n"
      f"{shared_context['planner_prompt']}"),
-    ("human", "{input}"),
+    ("human", "{question}"),
     MessagesPlaceholder(variable_name="agent_scratchpad")
 ])
 

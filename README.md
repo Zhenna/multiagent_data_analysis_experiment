@@ -29,60 +29,60 @@ Place your data files in `data/`:
 
 ## Usage
 
-### CLI
+1. **Install dependencies**
 
 ```bash
-python cli.py
+pip install -r requirements.txt
 ```
 
-Then enter your natural language question.
-
-### REST API
+2. **Start the CLI chatbot**
 
 ```bash
-uvicorn main:app --reload
+python app/cli.py
 ```
 
-Send a POST request to:
+3. **Run FastAPI server**
 
-```http
-POST http://localhost:8000/query
+```bash
+uvicorn app.main:app --reload
+```
+
+## API Usage
+
+**POST** `/query`
+
+```json
 {
-  "query": "Which inverter has the highest failure probability in May 2024?"
+  "question": "Which inverter has the highest failure rate in January?",
+  "inverter_id": "INV001",
+  "start_date": "2024-01-01",
+  "end_date": "2024-01-31",
+  "aggregation": "D"
 }
 ```
+
+## Notes
+
+- The model used is `llama3.2` via `ChatOllama` (Ollama must be installed and running).
+- Tools are invoked via structured prompts and JSON schema validation.
 
 ---
 
 ## Structure
 
 ```
-inverter_chatbot/
-├── app/
-│   ├── agents.py           # LangChain agent setup using tools and shared context
-│   ├── cli.py              # CLI interface to interact with the chatbot
-│   ├── main.py             # FastAPI app for REST API interaction
-│   ├── shared.py           # Loads CSVs and stores shared_context and dataset metadata
-│   └── tools.py            # Tool definitions for data extraction, aggregation, analysis
-├── data/
+.
+├── app
+│   ├── agents.py         # Agent setup using LangChain with function calling
+│   ├── cli.py            # CLI interface
+│   ├── main.py           # FastAPI application
+│   ├── models.py         # Pydantic models for structured input/output
+│   ├── shared.py         # Shared data loading and global state
+│   ├── tools.py          # Registered tools callable by agent
+├── data
 │   ├── inverter_performance_prediction.csv
 │   └── feature_importance.csv
-├── README.md               # Documentation and instructions
-├── requirements.txt        # Python dependencies
-
+├── requirements.txt
 ```
 
 ---
-
-## Requirements
-
-- Python 3.10+
-- `pip install -r requirements.txt`
-
-Ensure you have [Ollama](https://ollama.com/) installed and running a model like `llama3`.
-
----
-
-## Acknowledgment
-
-Built using LangChain, FastAPI, and Ollama for local language modeling.

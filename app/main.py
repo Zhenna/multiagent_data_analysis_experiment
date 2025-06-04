@@ -1,17 +1,17 @@
-# app/main.py
-
-from fastapi import FastAPI, Request
-from pydantic import BaseModel
+from fastapi import FastAPI
 from app.agents import planner_executor
+from app.models import QueryInput
 
-app = FastAPI()
+app = FastAPI(title="Inverter Chatbot API")
 
-class QueryRequest(BaseModel):
-    query: str
+@app.post("/query")
+def query_handler(payload: QueryInput):
+    result = planner_executor.invoke(payload.model_dump())
+    return {
+        "answer": result.get("output"),
+        "intermediate_steps": result.get("intermediate_steps", [])
+    }
 
-@app.post("/chat")
-async def chat_endpoint(req: QueryRequest):
-    """POST endpoint for querying the inverter chatbot."""
-    query = req.query
-    response = planner_executor.invoke({"input": query})
-    return {"response": response}
+@app.get("/")
+def health_check():
+    return {"status": "ok", "message": "Inverter chatbot is running."}
