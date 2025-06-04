@@ -3,11 +3,17 @@
 from langchain.agents import create_openai_functions_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain_community.chat_models import ChatOllama
+from langchain_openai import ChatOpenAI
+
 from app.tools import tools
 from app.shared import shared_context
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # Initialize the language model
-llm = ChatOllama(model="llama3.2")
+# llm = ChatOllama(model="llama3.2", temperature=0)
+llm = ChatOpenAI(model="gpt-4", temperature=0)
 
 # Prompt to guide agent behavior and restrict to tool usage
 prompt = ChatPromptTemplate.from_messages([
