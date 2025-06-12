@@ -9,7 +9,7 @@ class QueryInput(BaseModel):
     inverter_id: Optional[str] = None
     start_date: Optional[str] = None  # e.g., "2024-01-01"
     end_date: Optional[str] = None    # e.g., "2024-02-01"
-    aggregation: Optional[str] = "H"  # e.g., "H" for hourly, "D" for daily
+    aggregation: Optional[str] = None  # e.g., "H" for hourly, "D" for daily
 
 
 class InverterMetric(BaseModel):

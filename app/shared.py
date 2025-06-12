@@ -31,7 +31,7 @@ predefined_context = {
     },
     "features": {
         "description": "Feature importance scores for predicting inverter performance.",
-        "keywords": ["feature", "importance", "factor", "variable", "contributor"],
+        "keywords": ["feature", "importance", "factor", "variable", "contributor", "predicting"], 
         "key_columns": ["feature_name"],
         "metrics": ["importance"]
     }
